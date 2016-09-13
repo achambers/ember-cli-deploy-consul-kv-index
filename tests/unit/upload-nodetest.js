@@ -29,23 +29,24 @@ describe('Consul KV Index | upload hook', function() {
       var config = {
         allowOverwrite: false,
         namespaceToken: 'foo',
-        revisionKey: '1234',
-        consulClient: consulClient
+        revisionKey: '1234'
       };
 
       var context = {
         ui: mockUi,
         config: {
           'consul-kv-index': config
-        }
+        },
+        _consulLib: consulClient
       };
 
       instance.beforeHook(context);
       instance.configure(context);
+      instance.setup(context);
 
       consulClient.store['foo/revisions/1234'] = 'aaa';
 
-      return assert.isRejected(instance.upload())
+      return assert.isRejected(instance.upload(context))
         .then(function(message) {
           assert.equal(message, 'Revision already exists');
         });
@@ -60,21 +61,22 @@ describe('Consul KV Index | upload hook', function() {
         namespaceToken: 'foo',
         revisionKey: '1234',
         distDir: 'bogus-dir',
-        filePattern: 'foo.txt',
-        consulClient: consulClient
+        filePattern: 'foo.txt'
       };
 
       var context = {
         ui: mockUi,
         config: {
           'consul-kv-index': config
-        }
+        },
+        _consulLib: consulClient
       };
 
       instance.beforeHook(context);
       instance.configure(context);
+      instance.setup(context);
 
-      return assert.isRejected(instance.upload())
+      return assert.isRejected(instance.upload(context))
         .then(function(message) {
           assert.equal(message, 'No file found at `bogus-dir/foo.txt`');
         });
@@ -92,21 +94,22 @@ describe('Consul KV Index | upload hook', function() {
         filePattern: 'foo.txt',
         metadata: {
           baz: 'bop'
-        },
-        consulClient: consulClient
+        }
       };
 
       var context = {
         ui: mockUi,
         config: {
           'consul-kv-index': config
-        }
+        },
+        _consulLib: consulClient
       };
 
       instance.beforeHook(context);
       instance.configure(context);
+      instance.setup(context);
 
-      return assert.isFulfilled(instance.upload())
+      return assert.isFulfilled(instance.upload(context))
         .then(function() {
           var key = 'foo/revisions/1234';
           assert.equal(consulClient.store[key].trim(), 'bar');
@@ -130,23 +133,24 @@ describe('Consul KV Index | upload hook', function() {
         filePattern: 'foo.txt',
         metadata: {
           baz: 'bop'
-        },
-        consulClient: consulClient
+        }
       };
 
       var context = {
         ui: mockUi,
         config: {
           'consul-kv-index': config
-        }
+        },
+        _consulLib: consulClient
       };
 
       consulClient.store['foo/recent-revisions'] = 'aaa,bbb';
 
       instance.beforeHook(context);
       instance.configure(context);
+      instance.setup(context);
 
-      return assert.isFulfilled(instance.upload())
+      return assert.isFulfilled(instance.upload(context))
         .then(function() {
           var key = 'foo/recent-revisions';
           assert.equal(consulClient.store[key], '1234,aaa,bbb');
@@ -165,23 +169,24 @@ describe('Consul KV Index | upload hook', function() {
         filePattern: 'foo.txt',
         metadata: {
           baz: 'bop'
-        },
-        consulClient: consulClient
+        }
       };
 
       var context = {
         ui: mockUi,
         config: {
           'consul-kv-index': config
-        }
+        },
+        _consulLib: consulClient
       };
 
       consulClient.store['foo/recent-revisions'] = 'aaa,1234,bbb';
 
       instance.beforeHook(context);
       instance.configure(context);
+      instance.setup(context);
 
-      return assert.isFulfilled(instance.upload())
+      return assert.isFulfilled(instance.upload(context))
         .then(function() {
           var key = 'foo/recent-revisions';
           assert.equal(consulClient.store[key], 'aaa,1234,bbb');
@@ -200,21 +205,22 @@ describe('Consul KV Index | upload hook', function() {
         filePattern: 'foo.txt',
         metadata: {
           baz: 'bop'
-        },
-        consulClient: consulClient
+        }
       };
 
       var context = {
         ui: mockUi,
         config: {
           'consul-kv-index': config
-        }
+        },
+        _consulLib: consulClient
       };
 
       instance.beforeHook(context);
       instance.configure(context);
+      instance.setup(context);
 
-      return assert.isFulfilled(instance.upload())
+      return assert.isFulfilled(instance.upload(context))
         .then(function() {
           var key = 'foo/recent-revisions';
           assert.equal(consulClient.store[key], '1234');
@@ -234,15 +240,15 @@ describe('Consul KV Index | upload hook', function() {
         maxRevisions: 3,
         metadata: {
           baz: 'bop'
-        },
-        consulClient: consulClient
+        }
       };
 
       var context = {
         ui: mockUi,
         config: {
           'consul-kv-index': config
-        }
+        },
+        _consulLib: consulClient
       };
 
       consulClient.store['foo/recent-revisions'] = 'aaa,bbb,ccc';
@@ -255,8 +261,9 @@ describe('Consul KV Index | upload hook', function() {
 
       instance.beforeHook(context);
       instance.configure(context);
+      instance.setup(context);
 
-      return assert.isFulfilled(instance.upload())
+      return assert.isFulfilled(instance.upload(context))
         .then(function() {
           var key = 'foo/recent-revisions';
           assert.equal(consulClient.store[key], '1234,aaa,bbb');

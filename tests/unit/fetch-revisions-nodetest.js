@@ -26,24 +26,25 @@ describe('Consul KV Index | activate hook', function() {
     });
 
     var config = {
-      namespaceToken: 'foo',
-      consulClient: consulClient
+      namespaceToken: 'foo'
     };
 
     var context = {
       ui: mockUi,
       config: {
         'consul-kv-index': config
-      }
+      },
+      _consulLib: consulClient
     };
 
     instance.beforeHook(context);
     instance.configure(context);
+    instance.setup(context);
 
     consulClient.store['foo/recent-revisions'] = 'foo,bar,baz';
     consulClient.store['foo/active-revision'] = 'bar';
 
-    return assert.isFulfilled(instance.fetchRevisions())
+    return assert.isFulfilled(instance.fetchRevisions(context))
       .then(function(result) {
         assert.equal(result.revisions.length, 3);
         assert.equal(result.revisions[0].revision, 'foo');

@@ -26,23 +26,24 @@ describe('Consul KV Index | activate hook', function() {
     });
 
     var config = {
-      namespaceToken: 'foo',
-      consulClient: consulClient
+      namespaceToken: 'foo'
     };
 
     var context = {
       ui: mockUi,
       config: {
         'consul-kv-index': config
-      }
+      },
+      _consulLib: consulClient
     };
 
     instance.beforeHook(context);
     instance.configure(context);
+    instance.setup(context);
 
     consulClient.store['foo/recent-revisions'] = '1234';
 
-    return assert.isRejected(instance.activate())
+    return assert.isRejected(instance.activate(context))
       .then(function(message) {
         assert.equal(message, 'Revision key to activate must be provided');
       });
@@ -54,8 +55,7 @@ describe('Consul KV Index | activate hook', function() {
     });
 
     var config = {
-      namespaceToken: 'foo',
-      consulClient: consulClient
+      namespaceToken: 'foo'
     };
 
     var context = {
@@ -65,15 +65,17 @@ describe('Consul KV Index | activate hook', function() {
       },
       commandOptions: {
         revision: 'abcd'
-      }
+      },
+      _consulLib: consulClient
     };
 
     instance.beforeHook(context);
     instance.configure(context);
+    instance.setup(context);
 
     consulClient.store['foo/recent-revisions'] = '1234';
 
-    return assert.isRejected(instance.activate())
+    return assert.isRejected(instance.activate(context))
       .then(function(message) {
         assert.equal(message, 'Unknown revision key');
       });
@@ -85,8 +87,7 @@ describe('Consul KV Index | activate hook', function() {
     });
 
     var config = {
-      namespaceToken: 'foo',
-      consulClient: consulClient
+      namespaceToken: 'foo'
     };
 
     var context = {
@@ -96,16 +97,18 @@ describe('Consul KV Index | activate hook', function() {
       },
       commandOptions: {
         revision: '1234'
-      }
+      },
+      _consulLib: consulClient
     };
 
     instance.beforeHook(context);
     instance.configure(context);
+    instance.setup(context);
 
     consulClient.store['foo/recent-revisions'] = '1234';
     consulClient.store['foo/active-revision'] = 'qwerty';
 
-    return assert.isFulfilled(instance.activate())
+    return assert.isFulfilled(instance.activate(context))
       .then(function() {
         assert.equal(mockUi.messages.pop(), '\u001b[34m- ✔ Activated revision `1234` in namespace `foo`\u001b[39m');
       });

@@ -4,7 +4,8 @@ var fs        = require('fs');
 var path      = require('path');
 var denodeify = require('rsvp').denodeify;
 var readFile  = denodeify(fs.readFile);
-var consul    = require('consul');
+var consulLib = require('consul');
+var Consul    = require('./lib/consul');
 
 var Promise   = require('ember-cli/lib/ext/promise');
 
@@ -40,28 +41,38 @@ module.exports = {
           return context.revisionData || {};
         },
         allowOverwrite: true,
-        maxRevisions: 10,
-        consulClient: function(context) {
-          return context.consulClient.kv;
-        }
+        maxRevisions: 10
       },
 
-      setup: function() {
-        var host   = this.readConfig('host');
-        var port   = this.readConfig('port');
-        var secure = this.readConfig('secure');
+      setup: function(context) {
+        var namespaceToken       = this.readConfig('namespaceToken');
+        var recentRevisionsToken = this.readConfig('recentRevisionsToken');
+        var activeRevisionToken  = this.readConfig('activeRevisionToken');
 
-        var client = consul({
+        var host    = this.readConfig('host');
+        var port    = this.readConfig('port');
+        var secure  = this.readConfig('secure');
+        var options = {
           host: host,
           port: port,
           secure: secure,
           promisify: true
-        });
+        };
 
-        return { consulClient: client };
+        var client;
+
+        if (context._consulLib) {
+          client = context._consulLib;
+        } else {
+          client = consulLib(options).kv;
+        }
+
+        var consul = new Consul(client, namespaceToken, recentRevisionsToken, activeRevisionToken);
+
+        context._consul = consul;
       },
 
-      upload: function() {
+      upload: function(context) {
         var allowOverwrite = this.readConfig('allowOverwrite');
         var maxRevisions   = this.readConfig('maxRevisions');
         var namespace      = this.readConfig('namespaceToken');
@@ -72,35 +83,39 @@ module.exports = {
         var filePattern = this.readConfig('filePattern');
         var filePath    = path.join(distDir, filePattern);
 
+        var consul = context._consul;
+
         this.log('Uploading `' + filePath + '`', { verbose: true });
 
-        return this._determineIfShouldUpload(namespace, revisionKey, allowOverwrite)
+        return this._determineIfShouldUpload(consul, namespace, revisionKey, allowOverwrite)
           .then(this._readFileContents.bind(this, filePath))
-          .then(this._uploadRevision.bind(this, namespace, revisionKey))
-          .then(this._uploadMetadata.bind(this, namespace, revisionKey, metadata))
-          .then(this._updateRecentRevisions.bind(this, namespace, revisionKey))
-          .then(this._trimRecentRevisions.bind(this, namespace, maxRevisions))
+          .then(this._uploadRevision.bind(this, consul, revisionKey))
+          .then(this._uploadMetadata.bind(this, consul, revisionKey, metadata))
+          .then(this._updateRecentRevisions.bind(this, consul, revisionKey))
+          .then(this._trimRecentRevisions.bind(this, consul, maxRevisions))
           .then(this._uploadSuccess.bind(this, namespace, revisionKey));
       },
 
-      activate: function() {
+      activate: function(context) {
         var namespace   = this.readConfig('namespaceToken');
         var revisionKey = this.readConfig('revisionKeyToActivate');
 
+        var consul = context._consul;
+
         this.log('Activating revision `' + revisionKey + '` in namespace `' + namespace + '`', { verbose: true });
 
-        return this._recentRevisionKeys(namespace)
+        return consul.recentRevisionKeys()
           .then(this._validateRevisionKey.bind(this, revisionKey))
-          .then(this._activateRevision.bind(this, namespace, revisionKey))
+          .then(this._activateRevision.bind(this, consul, revisionKey))
           .then(this._activationSuccess.bind(this, namespace, revisionKey));
       },
 
-      fetchRevisions: function() {
-        var namespace = this.readConfig('namespaceToken');
+      fetchRevisions: function(context) {
+        var consul = context._consul;
 
         return Promise.hash({
-            revisions: this._recentRevisionKeys(namespace),
-            activeRevision: this._activeRevisionKey(namespace)
+            revisions: consul.recentRevisionKeys(),
+            activeRevision: consul.getActiveRevision()
           })
           .then(function(result) {
             return result.revisions.map(function(revisionKey) {
@@ -117,7 +132,7 @@ module.exports = {
         });
       },
 
-      _determineIfShouldUpload: function(namespace, revisionKey, shouldOverwrite) {
+      _determineIfShouldUpload: function(consul, namespace, revisionKey, shouldOverwrite) {
         var key = namespace + '/revisions/' + revisionKey;
 
         function checkForRevisionKey(keys) {
@@ -132,7 +147,7 @@ module.exports = {
           return Promise.resolve();
         }
 
-        return this._keys(key)
+        return consul.keys(key)
           .then(checkForRevisionKey.bind(this), handleNoKeys.bind(this));
       },
 
@@ -145,32 +160,28 @@ module.exports = {
           });
       },
 
-      _uploadRevision: function(namespace, revisionKey, data) {
-        return this._setRevision(namespace, revisionKey, data);
+      _uploadRevision: function(consul, revisionKey, data) {
+        return consul.setRevision(revisionKey, data);
       },
 
-      _uploadMetadata: function(namespace, revisionKey, metadata) {
-        return this._setRevisionMetadata(namespace, revisionKey, metadata);
+      _uploadMetadata: function(consul, revisionKey, metadata) {
+        return consul.setRevisionMetadata(revisionKey, metadata);
       },
 
-      _updateRecentRevisions: function(namespace, revisionKey) {
-        var self = this;
-
-        return this._recentRevisionKeys(namespace)
+      _updateRecentRevisions: function(consul, revisionKey) {
+        return consul.recentRevisionKeys()
           .then(function(revisionKeys) {
             if (revisionKeys.indexOf(revisionKey) === -1) {
               revisionKeys.unshift(revisionKey);
 
             }
 
-            return self._setRecentRevisions(namespace, revisionKeys.join(','));
+            return consul.setRecentRevisions(revisionKeys.join(','));
           });
       },
 
-      _trimRecentRevisions: function(namespace, maxRevisions) {
-        var self = this;
-
-        return this._recentRevisionKeys(namespace)
+      _trimRecentRevisions: function(consul, maxRevisions) {
+        return consul.recentRevisionKeys()
           .then(function(revisionKeys) {
             if (!revisionKeys.length || revisionKeys.length <= maxRevisions) {
               return Promise.resolve();
@@ -178,10 +189,10 @@ module.exports = {
 
             var remaining = revisionKeys.splice(0, maxRevisions);
 
-            return self._setRecentRevisions(namespace, remaining.join(','))
+            return consul.setRecentRevisions(remaining.join(','))
               .then(function() {
                   return Promise.all(revisionKeys.map(function(revisionKey) {
-                    return self._deleteRevision(namespace, revisionKey);
+                    return consul.deleteRevision(revisionKey);
                   }, []));
               });
           });
@@ -204,101 +215,14 @@ module.exports = {
         }
       },
 
-      _activateRevision: function(namespace, revisionKey) {
-        return this._setActiveRevision(namespace, revisionKey);
+      _activateRevision: function(consul, revisionKey) {
+        return consul.setActiveRevision(revisionKey);
       },
 
       _activationSuccess: function(namespace, revisionKey) {
         this.log('✔ Activated revision `' + revisionKey + '` in namespace `' + namespace + '`', { verbose: true });
 
         return Promise.resolve();
-      },
-
-      _activeRevisionKey: function(namespace) {
-        return this._getActiveRevision(namespace);
-      },
-
-      _recentRevisionKeys: function(namespace) {
-        return this._getRecentRevisions(namespace)
-          .then(function(result) {
-            var value = (result && result.split(',')) || [];
-
-            return Promise.resolve(value);
-          });
-      },
-
-      _getRecentRevisions: function(namespace) {
-        var recentRevisions = this.readConfig('recentRevisionsToken');
-        var key = namespace + '/' + recentRevisions;
-
-        return this._get(key);
-      },
-
-      _setRecentRevisions: function(namespace, value) {
-        var recentRevisions = this.readConfig('recentRevisionsToken');
-        var key = namespace + '/' + recentRevisions;
-
-        return this._set(key, value);
-      },
-
-      _setRevision: function(namespace, revisionKey, value) {
-        var key = namespace + '/revisions/' + revisionKey;
-
-        return this._set(key, value);
-      },
-
-      _deleteRevision: function(namespace, revisionKey) {
-        var key = namespace + '/revisions/' + revisionKey;
-        return this._delete({ key: key, recurse: true });
-      },
-
-      _setRevisionMetadata: function(namespace, revisionKey, value) {
-        var key = namespace + '/revisions/' + revisionKey + '/metadata';
-
-        return this._set(key, JSON.stringify(value));
-      },
-
-      _setActiveRevision: function(namespace, revisionKey) {
-        var activeRevision = this.readConfig('activeRevisionToken');
-        var key = namespace + '/' + activeRevision;
-
-        return this._set(key, revisionKey);
-      },
-
-      _getActiveRevision: function(namespace) {
-        var activeRevision = this.readConfig('activeRevisionToken');
-        var key = namespace + '/' + activeRevision;
-
-        return this._get(key);
-      },
-
-      _keys: function(key) {
-        var consul = this.readConfig('consulClient');
-
-        return consul.keys(key);
-      },
-
-      _get: function(key) {
-        var consul = this.readConfig('consulClient');
-
-        return consul.get(key)
-          .then(function(result) {
-            var value = (result && result['Value']) || null;
-
-            return Promise.resolve(value);
-          });
-      },
-
-      _set: function(key, value) {
-        var consul = this.readConfig('consulClient');
-
-        return consul.set(key, value);
-      },
-
-      _delete: function(options) {
-        var consul = this.readConfig('consulClient');
-
-        return consul.del(options);
       }
     });
 

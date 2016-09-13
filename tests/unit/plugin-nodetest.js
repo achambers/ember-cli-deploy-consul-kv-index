@@ -25,5 +25,8 @@ describe('Consul KV Index plugin', function() {
 
     assert.isDefined(plugin.activate);
     assert.isFunction(plugin.activate);
+
+    assert.isDefined(plugin.fetchRevisions);
+    assert.isFunction(plugin.fetchRevisions);
   });
 });
